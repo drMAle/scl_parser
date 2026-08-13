@@ -718,6 +718,277 @@ def check_control_attributes(model, issues):
                             )
 
 
+
+# ============================================================================
+# Semantic / consistency checks
+# ============================================================================
+
+def _normalise_value(value):
+    if value is None:
+        return None
+    return str(value).strip()
+
+
+def _check_allowed_value(ln, path, allowed, issues, location, label=None):
+    value = _normalise_value(_value(ln, path))
+    if value is None:
+        return
+
+    if value not in allowed:
+        label = label or path
+        issues.append(
+            _warning(
+                f"{label} has value '{value}', expected one of: "
+                f"{', '.join(sorted(str(x) for x in allowed))}.",
+                location,
+            )
+        )
+
+
+def check_semantic_states(model, issues):
+    """Check common CEI state/enumeration values."""
+    for ied, ap, server, ld in _iter_devices(model):
+        for ln in getattr(ld, "all_logical_nodes", []):
+            location = _location(ied, ap, server, ld, ln)
+
+            if ln.ln_class in (
+                "DECP", "DGEN", "DSTO", "DWMX", "DAGC",
+                "DVAR", "DFPF", "DVVR", "DPMC", "DPFW",
+            ):
+                _check_allowed_value(
+                    ln, "Beh.stVal",
+                    {"on", "off", "blocked", "test", "test/blocked",
+                     "on-blocked", "off-blocked", "inactive"},
+                    issues, location, "Beh.stVal",
+                )
+
+            if ln.ln_class == "DGEN":
+                _check_allowed_value(
+                    ln, "Health.stVal",
+                    {"Ok", "Warning", "Alarm", "Failure",
+                     "Non-operational"},
+                    issues, location, "Health.stVal",
+                )
+
+            if ln.ln_class in (
+                "DWMX", "DAGC", "DVAR", "DFPF", "DVVR", "DPFW"
+            ):
+                _check_allowed_value(
+                    ln, "Mod.stVal",
+                    {"on", "off", "blocked", "test", "test/blocked",
+                     "inactive"},
+                    issues, location, "Mod.stVal",
+                )
+
+
+def check_dgen_identity(model, issues):
+    """Check DGEN.inst, prefix and GnGrId consistency."""
+    for ied, ap, server, ld in _iter_devices(model):
+        for ln in _iter_lns(ld, "DGEN"):
+            location = _location(ied, ap, server, ld, ln)
+
+            inst = _normalise_value(getattr(ln, "inst", None))
+            prefix = _normalise_value(getattr(ln, "prefix", ""))
+
+            if prefix and prefix not in ("SSGG", "DGEN"):
+                issues.append(
+                    _warning(
+                        f"DGEN has unexpected prefix '{prefix}'. "
+                        "The project profile uses 'SSGG' for generator groups.",
+                        location,
+                    )
+                )
+
+            group_id = _normalise_value(_value(ln, "GnGrId.stVal"))
+
+            if inst is not None and group_id is not None:
+                try:
+                    if int(inst) != int(group_id):
+                        issues.append(
+                            _warning(
+                                f"DGEN inst='{inst}' is inconsistent with "
+                                f"GnGrId.stVal='{group_id}'.",
+                                location,
+                            )
+                        )
+                except ValueError:
+                    pass
+
+
+def check_measurement_structure(model, issues):
+    """Check MMXU measurement DOs for the expected mag structure."""
+    for ied, ap, server, ld in _iter_devices(model):
+        for ln in _iter_lns(ld, "MMXU"):
+            location = _location(ied, ap, server, ld, ln)
+
+            for do_name in ("TotW", "TotVAr", "PPV"):
+                do = _get_do(ln, do_name)
+                if do is None:
+                    continue
+
+                if (_get_sdi(do, "mag") is None and
+                        _get_dai(do, "mag") is None):
+                    issues.append(
+                        _warning(
+                            f"MMXU DO '{do_name}' exists but has no "
+                            "'mag' measurement attribute.",
+                            location,
+                        )
+                    )
+
+            if ln.has_data_object("A"):
+                do = _get_do(ln, "A")
+                if (_get_sdi(do, "mag") is None and
+                        _get_dai(do, "mag") is None):
+                    issues.append(
+                        _warning(
+                            "Optional MMXU DO 'A' is present but has no "
+                            "'mag' measurement attribute.",
+                            location,
+                        )
+                    )
+
+
+def check_control_semantics(model, issues):
+    """Check basic consistency of control setpoints and ctlModel."""
+    setpoint_paths = {
+        "DWMX": ("WMaxSptPct.mxVal.f",),
+        "DAGC": ("WSptPct.mxVal.f",),
+        "DVAR": ("VArTgtSptPct.mxVal.f",),
+        "DVVR": ("K.setMag",),
+        "DPMC": ("WSpt1.ctlVal",),
+    }
+
+    for ied, ap, server, ld in _iter_devices(model):
+        for ln_class, paths in setpoint_paths.items():
+            for ln in _iter_lns(ld, ln_class):
+                location = _location(ied, ap, server, ld, ln)
+
+                for path_name in paths:
+                    item = _resolve_path(ln, path_name)
+                    if item is None:
+                        continue
+
+                    value = _normalise_value(getattr(item, "value", None))
+                    if value is None or value == "":
+                        issues.append(
+                            _warning(
+                                f"Control setpoint '{path_name}' is present "
+                                "but has no configured value.",
+                                location,
+                            )
+                        )
+
+                for do in getattr(ln, "data_objects", []):
+                    ctl_model = do.get_data_attribute("ctlModel")
+                    st_val = do.get_data_attribute("stVal")
+
+                    if ctl_model is not None and st_val is None:
+                        issues.append(
+                            _warning(
+                                f"Control DO '{do.name}' has ctlModel but "
+                                "no stVal.",
+                                location,
+                            )
+                        )
+
+
+def check_dpfw_curve(model, issues):
+    """Check structural consistency of DPFW curve points."""
+    curve_pairs = (
+        ("WSetA", "PFSetA"),
+        ("WSetB", "PFSetB"),
+        ("WSetC", "PFSetC"),
+    )
+
+    for ied, ap, server, ld in _iter_devices(model):
+        for ln in _iter_lns(ld, "DPFW"):
+            location = _location(ied, ap, server, ld, ln)
+
+            for w_name, pf_name in curve_pairs:
+                w_exists = ln.has_data_object(w_name)
+                pf_exists = ln.has_data_object(pf_name)
+
+                if w_exists != pf_exists:
+                    missing = pf_name if w_exists else w_name
+                    issues.append(
+                        _warning(
+                            f"DPFW curve point is incomplete: "
+                            f"'{missing}' is missing.",
+                            location,
+                        )
+                    )
+
+
+def check_namespace_semantics(model, issues):
+    """Check CEI-016 dataNs markers when they are explicitly present."""
+    cei_marker = "IEC 61850-CEI016:2025"
+
+    for ied, ap, server, ld in _iter_devices(model):
+        for ln in getattr(ld, "all_logical_nodes", []):
+            location = _location(ied, ap, server, ld, ln)
+
+            if ln.ln_class not in CONTROL_LN_CLASSES and ln.ln_class != "DGEN":
+                continue
+
+            for do in getattr(ln, "data_objects", []):
+                data_ns = do.get_data_attribute("dataNs")
+                if data_ns is None:
+                    continue
+
+                value = _normalise_value(data_ns.value)
+                if value and cei_marker not in value:
+                    issues.append(
+                        _warning(
+                            f"DO '{do.name}' has dataNs='{value}', "
+                            f"which does not contain '{cei_marker}'.",
+                            location,
+                        )
+                    )
+
+
+def check_cross_function_consistency(model, issues):
+    """
+    Check paired Q(V) configuration.
+
+    If DPMC or DECP are used, the project profile expects instances 1 and 2.
+    Missing members are informational because the function itself is optional.
+    """
+    for ied, ap, server, ld in _iter_devices(model):
+        location = _location(ied, ap, server, ld)
+
+        dpmc = {
+            _normalise_value(getattr(ln, "inst", None))
+            for ln in _iter_lns(ld, "DPMC")
+        }
+        decp = {
+            _normalise_value(getattr(ln, "inst", None))
+            for ln in _iter_lns(ld, "DECP")
+        }
+
+        if dpmc:
+            for expected in ("1", "2"):
+                if expected not in dpmc:
+                    issues.append(
+                        _info(
+                            f"DPMC instance {expected} is not present; "
+                            "Q(V) lock-in/lock-out configuration may be incomplete.",
+                            location,
+                        )
+                    )
+
+        if decp:
+            for expected in ("1", "2"):
+                if expected not in decp:
+                    issues.append(
+                        _info(
+                            f"DECP instance {expected} is not present; "
+                            "the paired Q(V) voltage threshold may be incomplete.",
+                            location,
+                        )
+                    )
+
+
 # ============================================================================
 # Public API
 # ============================================================================
@@ -748,6 +1019,15 @@ def analyze_cei016(model):
     check_dgen(model, issues)
     check_control_attributes(model, issues)
 
+    # Semantic / cross-function checks
+    check_semantic_states(model, issues)
+    check_dgen_identity(model, issues)
+    check_measurement_structure(model, issues)
+    check_control_semantics(model, issues)
+    check_dpfw_curve(model, issues)
+    check_namespace_semantics(model, issues)
+    check_cross_function_consistency(model, issues)
+
     return issues
 
 
@@ -763,4 +1043,11 @@ __all__ = [
     "CONTROL_LN_CLASSES",
     "analyze_cei016",
     "check_cei016",
+    "check_semantic_states",
+    "check_dgen_identity",
+    "check_measurement_structure",
+    "check_control_semantics",
+    "check_dpfw_curve",
+    "check_namespace_semantics",
+    "check_cross_function_consistency",
 ]
