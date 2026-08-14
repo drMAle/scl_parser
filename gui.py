@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 
-from scl_parser import SCLModel
+from model import SCLModel
 from analyzer import Analyzer
 from version import APP_NAME, VERSION, AUTHOR
 
@@ -354,6 +354,10 @@ class SCLAnalyzerApp:
 
         if not filename:
             return
+
+        self.analyze_file(Path(filename))
+
+    def analyze_file(self, filename):
 
         self.current_file = Path(filename)
 
