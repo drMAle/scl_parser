@@ -26,11 +26,13 @@ class Analyzer:
     def __init__(
         self,
         model,
-        cei016_enabled=True
+        cei016_enabled=True,
+        cei57142_enabled=True
     ):
 
         self.model = model
         self.cei016_enabled = cei016_enabled
+        self.cei57142_enabled = cei57142_enabled
         self.issues = []
 
     def add_issue(
@@ -75,5 +77,13 @@ class Analyzer:
             from rules.cei016 import run_cei016_rules
 
             run_cei016_rules(self)
+
+        # -----------------------------------------------------
+        # CEI 57-142 checks
+        # -----------------------------------------------------
+
+        if self.cei57142_enabled:
+            from rules.cei57142 import run_cei57142_rules
+            run_cei57142_rules(self)
 
         return self.issues

@@ -1,3 +1,3 @@
-APP_NAME = "SCL Analyzer"
-VERSION = "0.3.0"
+APP_NAME = "SCL Parser"
+VERSION = "3.0.0"
 AUTHOR = "Alessandro Maggi"

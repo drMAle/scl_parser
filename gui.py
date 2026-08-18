@@ -2,8 +2,11 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 
-from model import SCLModel
+from scl_parser import SCLModel
 from analyzer import Analyzer
+from pcap_model import PcapModel
+from pcap_analyzer import analyze_pcap
+from scl_pcap_compare import compare_scl_pcap
 from version import APP_NAME, VERSION, AUTHOR
 
 
@@ -52,8 +55,18 @@ class SCLAnalyzerApp:
         )
 
         file_menu.add_command(
-            label="Open",
-            command=self.open_file
+            label="Open SCL",
+            command=self.open_scl
+        )
+
+        file_menu.add_command(
+            label="Open PCAP",
+            command=self.open_pcap
+        )
+
+        file_menu.add_command(
+            label="Compare SCL and PCAP",
+            command=self.compare_scl_pcap
         )
 
         file_menu.add_separator()
@@ -78,12 +91,21 @@ class SCLAnalyzerApp:
         )
 
         self.cei016_enabled = tk.BooleanVar(
-            value=True 
-        ) 
+            value=True
+        )
+
+        self.cei57142_enabled = tk.BooleanVar(
+            value=True
+        )
         
         options_menu.add_checkbutton(
-            label="CEI 0-16 checks", 
+            label="CEI 0-16 checks",
             variable=self.cei016_enabled
+        )
+
+        options_menu.add_checkbutton(
+            label="CEI 57-142 checks",
+            variable=self.cei57142_enabled
         )
 
         menubar.add_cascade(
@@ -143,7 +165,7 @@ class SCLAnalyzerApp:
 
         ttk.Label(
             file_frame,
-            text="SCL file:"
+            text="Input:"
         ).pack(
             side=tk.LEFT
         )
@@ -339,7 +361,7 @@ class SCLAnalyzerApp:
     # OPEN
     # =========================================================
 
-    def open_file(self):
+    def open_scl(self):
 
         filename = filedialog.askopenfilename(
             title="Open SCL file",
@@ -354,10 +376,6 @@ class SCLAnalyzerApp:
 
         if not filename:
             return
-
-        self.analyze_file(Path(filename))
-
-    def analyze_file(self, filename):
 
         self.current_file = Path(filename)
 
@@ -383,7 +401,8 @@ class SCLAnalyzerApp:
 
             analyzer = Analyzer(
                 model,
-                cei016_enabled=self.cei016_enabled.get()
+                cei016_enabled=self.cei016_enabled.get(),
+                cei57142_enabled=self.cei57142_enabled.get()
             )
 
             self.issues = analyzer.run()
@@ -443,6 +462,101 @@ class SCLAnalyzerApp:
             messagebox.showerror(
                 "Analysis Error",
                 str(exc)
+            )
+
+    def open_pcap(self):
+        filename = filedialog.askopenfilename(
+            title="Open PCAP capture",
+            filetypes=[
+                ("PCAP files", "*.pcap"),
+                ("PCAPNG files", "*.pcapng"),
+                ("Capture files", "*.pcap *.pcapng"),
+                ("All files", "*.*")
+            ]
+        )
+        if not filename:
+            return
+
+        self.current_file = Path(filename)
+        self.file_label.config(text=str(self.current_file))
+        self.clear_results()
+        self.status_label.config(text="Analyzing PCAP...")
+        self.root.update_idletasks()
+
+        try:
+            model = PcapModel(self.current_file)
+            model.load()
+            self.issues = analyze_pcap(model)
+            self.display_results()
+            self.status_label.config(text="PCAP analysis completed")
+            self._show_analysis_summary("PCAP analysis completed")
+        except Exception as exc:
+            self.status_label.config(text="PCAP analysis failed")
+            messagebox.showerror("PCAP Analysis Error", str(exc))
+
+    def compare_scl_pcap(self):
+        scl_filename = filedialog.askopenfilename(
+            title="Select SCL file",
+            filetypes=[
+                ("ICD files", "*.icd"),
+                ("CID files", "*.cid"),
+                ("SCD files", "*.scd"),
+                ("SCL files", "*.scl"),
+                ("All files", "*.*")
+            ]
+        )
+        if not scl_filename:
+            return
+
+        pcap_filename = filedialog.askopenfilename(
+            title="Select PCAP capture",
+            filetypes=[
+                ("PCAP files", "*.pcap"),
+                ("PCAPNG files", "*.pcapng"),
+                ("Capture files", "*.pcap *.pcapng"),
+                ("All files", "*.*")
+            ]
+        )
+        if not pcap_filename:
+            return
+
+        self.current_file = Path(pcap_filename)
+        self.file_label.config(
+            text=f"SCL: {Path(scl_filename)} | PCAP: {self.current_file}"
+        )
+        self.clear_results()
+        self.status_label.config(text="Comparing SCL and PCAP...")
+        self.root.update_idletasks()
+
+        try:
+            pcap_model = PcapModel(self.current_file)
+            pcap_model.load()
+            self.issues = compare_scl_pcap(scl_filename, pcap_model)
+            self.display_results()
+            self.status_label.config(text="SCL/PCAP comparison completed")
+            self._show_analysis_summary("SCL/PCAP comparison completed")
+        except Exception as exc:
+            self.status_label.config(text="Comparison failed")
+            messagebox.showerror("Comparison Error", str(exc))
+
+    def _show_analysis_summary(self, title):
+        errors = sum(1 for issue in self.issues if issue.severity == "ERROR")
+        warnings = sum(1 for issue in self.issues if issue.severity == "WARNING")
+
+        if errors == 0 and warnings == 0:
+            messagebox.showinfo(title, "Analysis completed: No errors found.")
+        elif errors == 0:
+            messagebox.showwarning(
+                title,
+                f"Analysis completed: No errors found.\n"
+                f"However, {warnings} warning(s) were detected.\n\n"
+                f"Please check the warning list."
+            )
+        else:
+            messagebox.showerror(
+                title,
+                f"Analysis completed: {errors} error(s) found.\n\n"
+                f"Please check the error list."
             )
 
     # =========================================================

@@ -1,22 +1,44 @@
-# IEC 61850 SCL Analyzer
+# SCL Analyzer — Complete Integrated Package
 
-Cross-platform Python/Tkinter analyzer for IEC 61850 SCL/CID/SCD/ICD files.
+This package combines the current IEC 61850 SCL validator with the CEI 0-16 validation layer, the CEI 57-142 validator layer, and the initial PCAP/discovery analysis and SCL↔PCAP comparison functions.
+
+## Main functions
+
+### File → Open SCL
+Runs the existing SCL validation stack:
+
+- IEC 61850/SCL structural checks
+- Dataset checks
+- Report checks
+- GOOSE checks
+- CEI 0-16 checks (optional, enabled by default)
+- CEI 57-142 checks (optional, enabled by default)
+
+### File → Open PCAP
+Loads a `.pcap` or `.pcapng` capture and performs the current capture-level checks:
+
+- Ethernet/IPv4/TCP parsing
+- MMS/TCP 102 detection
+- preliminary discovery detection
+- capture completeness warnings where the available evidence is insufficient
+
+The PCAP module deliberately does not claim full MMS/ASN.1 discovery conformance yet; missing evidence is reported as WARNING rather than converted into false-positive errors.
+
+### File → Compare SCL and PCAP
+Loads one SCL and one capture and performs the current SCL/runtime alignment checks. The comparison layer is designed to be extended with complete MMS discovery reconstruction and later report/GOOSE timing analysis.
 
 ## Architecture
 
-- `model.py` — effective IEC 61850 SCL model, including LNodeType inheritance and DO/DA/SDO/DAType resolution.
-- `scl_parser.py` — backward-compatible import shim to `model.py`.
-- `analyzer.py` — common issue collector and rule orchestration.
-- `rules/basic.py` — general SCL/IED/LDevice/LN checks.
-- `rules/datasets.py` — DataSet and FCDA checks.
-- `rules/reports.py` — ReportControl/DataSet checks.
-- `rules/goose.py` — GSEControl/DataSet checks.
-- `rules/cei016.py` — adapter from the CEI 0-16 profile to the common Analyzer format.
-- `cei016_observability.py` — CEI 0-16 V5 Annex T observability matrix.
-- `cei016_profile.py` — matrix-driven CEI 0-16 validation using the effective model.
-- `gui.py` — Tkinter GUI.
-- `main.py` — GUI entry point; accepts an optional SCL path.
-- `test_parser.py` — command-line regression test.
+- `model.py` — effective IEC 61850 SCL model and inheritance resolution
+- `scl_parser.py` — backward-compatible import layer
+- `rules/` — generic IEC 61850, Dataset, Report, GOOSE and CEI 0-16 adapters
+- `cei57142/` — CEI 57-142 validator package
+- `cei57142_profile.py` — top-level CEI 57-142 entry point
+- `pcap_model.py` — capture model
+- `pcap_analyzer.py` — PCAP validation
+- `scl_pcap_compare.py` — SCL/PCAP comparison
+- `gui.py` — Tkinter GUI
+- `main.py` — application entry point
 
 ## Run
 
@@ -24,40 +46,8 @@ Cross-platform Python/Tkinter analyzer for IEC 61850 SCL/CID/SCD/ICD files.
 python main.py
 ```
 
-or analyze a file immediately:
+No third-party Python package is required by the current PCAP layer.
 
-```bash
-python main.py path/to/file.cid
-```
+## Important
 
-Command-line test:
-
-```bash
-python test_parser.py path/to/file.cid
-```
-
-Disable CEI 0-16 for comparison:
-
-```bash
-python test_parser.py path/to/file.cid --no-cei016
-```
-
-CEI 0-16 checks are enabled by default under **Options -> CEI 0-16 checks**.
-
-## Effective model
-
-The CEI 0-16 validator does not treat the presence of `DOI`/`DAI` as the definition of the Logical Node model. It resolves the effective model through:
-
-```text
-LN
- └── LNodeType
-      └── DO
-           └── DOType
-                ├── DA
-                └── SDO
-                     └── DOType
-```
-
-Structured data attributes are resolved through `DAType`/`BDA` as applicable.
-
-This prevents false positives when a required DO or DA is defined by the type but is not explicitly repeated as an instance element.
+The PCAP functionality is intentionally incremental. The next development step is a proper MMS/ASN.1 discovery decoder so that the runtime model can be populated with Server, Logical Device, Logical Node, Data Object/Data Attribute, Dataset and Report Control Block information. Timing analysis (report periodicity, jitter, second-zero alignment, sequence handling and GOOSE timing) can then be added without changing the GUI architecture.
