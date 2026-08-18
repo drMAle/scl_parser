@@ -60,8 +60,8 @@ class Analyzer:
 
         from rules.basic import run_basic_rules
         from rules.datasets import run_dataset_rules
-        from rules.reports import run_report_rules
-        from rules.goose import run_goose_rules
+        from iec61850_rules.reports import run_report_rules
+        from iec61850_rules.goose import run_goose_rules
 
         run_basic_rules(self)
         run_dataset_rules(self)
