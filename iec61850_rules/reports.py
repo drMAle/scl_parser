@@ -34,10 +34,11 @@ def _run_dataset_checks(analyzer, ld, ln0, rc):
     name = rc.get('name') or '<unnamed>'
     loc = f'{_ln_id(ln0)}/ReportControl={name}'
     ds_name = rc.get('datSet')
+    print(ied, name, loc, ds_name)
     if not ds_name:
         analyzer.add_issue('ERROR', 'REP-003', ied, loc, 'ReportControl is missing the datSet reference.')
         return
-    matches = [d for d in _datasets(ld) if d.get('name') == ds_name]
+    matches = [d for d in _datasets(ln0) if d.get('name') == ds_name]
     if not matches:
         analyzer.add_issue('ERROR', 'REP-004', ied, loc, f"ReportControl references DataSet '{ds_name}', but it does not exist in the same LDevice.")
         return

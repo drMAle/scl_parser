@@ -95,7 +95,7 @@ class SCLAnalyzerApp:
         )
 
         self.cei57142_enabled = tk.BooleanVar(
-            value=True
+            value=False
         )
         
         options_menu.add_checkbutton(
@@ -366,8 +366,9 @@ class SCLAnalyzerApp:
         filename = filedialog.askopenfilename(
             title="Open SCL file",
             filetypes=[
-                ("ICD files", "*.icd"),
+                ("SCL files files", "*.cid *.icd *.scd *.scl"),
                 ("CID files", "*.cid"),
+                ("ICD files", "*.icd"),
                 ("SCD files", "*.scd"),
                 ("SCL files", "*.scl"),
                 ("All files", "*.*")
@@ -468,9 +469,9 @@ class SCLAnalyzerApp:
         filename = filedialog.askopenfilename(
             title="Open PCAP capture",
             filetypes=[
+                ("Capture files", "*.pcap *.pcapng"),
                 ("PCAP files", "*.pcap"),
                 ("PCAPNG files", "*.pcapng"),
-                ("Capture files", "*.pcap *.pcapng"),
                 ("All files", "*.*")
             ]
         )

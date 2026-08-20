@@ -83,6 +83,11 @@ class Analyzer:
         # -----------------------------------------------------
 
         if self.cei57142_enabled:
+            from tkinter import Tk, messagebox
+            messagebox.showwarning(
+                "Warning",
+                "CEIXX is an experimental feature"
+            )
             from rules.cei57142 import run_cei57142_rules
             run_cei57142_rules(self)
 
