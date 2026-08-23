@@ -1,53 +1,103 @@
-# SCL Analyzer — Complete Integrated Package
+# IEC 61850 SCL / PCAP Analyzer
 
-This package combines the current IEC 61850 SCL validator with the CEI 0-16 validation layer, the CEI 57-142 validator layer, and the initial PCAP/discovery analysis and SCL↔PCAP comparison functions.
+Unified IEC 61850 model architecture for validating SCL files, validating MMS discovery captures, and comparing an expected SCL model with an observed PCAP model.
 
-## Main functions
+## Core principle: observation never invents
 
-### File → Open SCL
-Runs the existing SCL validation stack:
+The PCAP parser is an **observation parser**. It creates model elements only from information actually decoded from the capture. It never copies or infers missing objects from an SCL file.
 
-- IEC 61850/SCL structural checks
-- Dataset checks
-- Report checks
-- GOOSE checks
-- CEI 0-16 checks (optional, enabled by default)
-- CEI 57-142 checks (optional, enabled by default)
+If a required discovery stage is absent, the supplied test evidence is considered incomplete and the analyzer reports an **ERROR**.
 
-### File → Open PCAP
-Loads a `.pcap` or `.pcapng` capture and performs the current capture-level checks:
+Therefore:
 
-- Ethernet/IPv4/TCP parsing
-- MMS/TCP 102 detection
-- preliminary discovery detection
-- capture completeness warnings where the available evidence is insufficient
-
-The PCAP module deliberately does not claim full MMS/ASN.1 discovery conformance yet; missing evidence is reported as WARNING rather than converted into false-positive errors.
-
-### File → Compare SCL and PCAP
-Loads one SCL and one capture and performs the current SCL/runtime alignment checks. The comparison layer is designed to be extended with complete MMS discovery reconstruction and later report/GOOSE timing analysis.
+- SCL = expected/declarative model.
+- PCAP = observed/evidence model.
+- Missing expected object in PCAP = `ERROR` during comparison.
+- Missing required discovery evidence = `ERROR`.
+- Observed object not declared by SCL = `INFO` by default.
+- No observed object is synthesized merely to make a comparison pass.
 
 ## Architecture
 
-- `model.py` — effective IEC 61850 SCL model and inheritance resolution
-- `scl_parser.py` — backward-compatible import layer
-- `rules/` — generic IEC 61850, Dataset, Report, GOOSE and CEI 0-16 adapters
-- `cei57142/` — CEI 57-142 validator package
-- `cei57142_profile.py` — top-level CEI 57-142 entry point
-- `pcap_model.py` — capture model
-- `pcap_analyzer.py` — PCAP validation
-- `scl_pcap_compare.py` — SCL/PCAP comparison
-- `gui.py` — Tkinter GUI
-- `main.py` — application entry point
+```text
+Model
+├── SCLModel       <- built from SCL/XML
+└── PcapModel      <- built from PCAP/MMS discovery
 
-## Run
+sources/
+├── scl/           <- XML/SCL source parsing
+└── pcap/          <- packet capture parsing + observation builder
 
-```bash
+rules/
+├── iec61850/      <- model validation rules
+└── cei016/        <- CEI 0-16 profile rules
+
+comparison/        <- expected SCL vs observed PCAP
+analyzer/           <- orchestration and results
+gui/                <- Tkinter UI
+```
+
+## PCAP discovery currently decoded
+
+The MMS decoder implements the BER/MMS structures needed for:
+
+- `GetNameList`
+- `Identify`
+- `GetVariableAccessAttributes`
+- `GetNamedVariableListAttributes`
+
+The PCAP model uses these transactions to construct an observed XML-shaped model containing only observed:
+
+- Logical Devices
+- Logical Nodes
+- Data Objects
+- Data Attributes / nested SDI paths
+- DataSets and observed members
+
+The mapping follows the IEC 61850-8-1 MMS service model; `GetNameList` is interpreted using its encoded MMS object class and scope, while `GetVariableAccessAttributes` and `GetNamedVariableListAttributes` provide lower-level type/dataset evidence. IEC 61850-8-1 defines these mappings to MMS. 
+
+## Required discovery evidence
+
+For a capture to be accepted as a complete model-discovery test, the analyzer requires evidence for:
+
+- `GetServerDirectory`
+- `GetLogicalNodeDirectory`
+- `GetDataDirectory`
+- `GetVariableAccessAttributes`
+- `GetDataSetDirectory`
+
+The parser does not mark a stage as observed unless the corresponding MMS evidence was decoded/correlated.
+
+## GUI
+
+`Options` contains:
+
+- `IEC 61850 checks`
+- `CEI 0-16 checks`
+
+The same analyzer entry point is used for SCL and PCAP models. CEI 0-16 rules are currently applied to SCL models, because the current CEI profile is a configuration/profile validator rather than an observation rule set.
+
+## Command line
+
+Open the GUI normally:
+
+```text
 python main.py
 ```
 
-No third-party Python package is required by the current PCAP layer.
+Open a file directly:
 
-## Important
+```text
+python main.py plant.cid
+python main.py discovery.pcapng
+```
 
-The PCAP functionality is intentionally incremental. The next development step is a proper MMS/ASN.1 discovery decoder so that the runtime model can be populated with Server, Logical Device, Logical Node, Data Object/Data Attribute, Dataset and Report Control Block information. Timing analysis (report periodicity, jitter, second-zero alignment, sequence handling and GOOSE timing) can then be added without changing the GUI architecture.
+or explicitly select PCAP:
+
+```text
+python main.py discovery.pcapng --pcap
+```
+
+## Standard library
+
+The core project has no mandatory third-party Python dependency. Tkinter must be available in the Python installation used to run the GUI.

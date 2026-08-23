@@ -132,16 +132,30 @@ def _all_printable_strings(node: BERNode) -> list[str]:
 # conservative and only maps services whose structure we consume.
 REQUEST_SERVICES = {
     1: "getNameList",
-    4: "identify",
+    2: "identify",
     6: "getVariableAccessAttributes",
-    11: "getNamedVariableListAttributes",
-    12: "getNamedVariableListAttributes",  # tolerated vendor/edition variant
+    12: "getNamedVariableListAttributes",
 }
 RESPONSE_SERVICES = {
     1: "getNameList",
-    4: "identify",
+    2: "identify",
     6: "getVariableAccessAttributes",
-    11: "getNamedVariableListAttributes",
+    12: "getNamedVariableListAttributes",
+}
+
+MMS_OBJECT_CLASSES = {
+    0: "namedVariable",
+    1: "scatteredAccess",
+    2: "namedVariableList",
+    3: "namedType",
+    4: "semaphore",
+    5: "eventCondition",
+    6: "eventAction",
+    7: "eventEnrollment",
+    8: "journal",
+    9: "domain",
+    10: "programInvocation",
+    11: "operatorStation",
 }
 
 
@@ -160,6 +174,9 @@ class MMSMessage:
     more_follows: bool | None = None
     object_name: str | None = None
     variable_attributes: dict | None = None
+    named_variable_list_attributes: dict | None = None
+    server_identity: dict | None = None
+    domain_name: str | None = None
 
 
 @dataclass
@@ -249,34 +266,44 @@ def _primitive_strings(node: BERNode) -> list[str]:
     return out
 
 
-def _decode_get_name_list_request(service_node: BERNode) -> tuple[int | None, str | None, str | None]:
-    """Decode the GetNameList request enough to identify its scope.
+def _decode_get_name_list_request(service_node: BERNode) -> tuple[int | None, str | None, str | None, str | None]:
+    """Decode GetNameList request object class/scope exactly as encoded.
 
-    The service is a context-specific [1] sequence containing objectClass [0]
-    and objectScope [1].  Scope is represented by a choice; for the discovery
-    use case we expose the choice name rather than guessing an IEC 61850 path.
+    The domain name is returned when objectScope is domainSpecific.  No IEC
+    61850 hierarchy is inferred here; the raw MMS request semantics are kept
+    for the observation builder.
     """
     object_class = None
     object_scope = None
+    domain_name = None
     oc = first_context(service_node, 0)
     if oc is not None:
-        # ObjectClass is an INTEGER under an IMPLICIT context-specific tag.
-        if oc.value:
-            try:
-                object_class = decode_integer(oc)
-            except Exception:
-                object_class = None
+        # ExtendedObjectClass [0] contains objectClass [0] in most encodings.
+        candidate = oc
+        if candidate.constructed and candidate.children:
+            nested = next((x for x in candidate.children if x.tag_class == 2 and x.tag == 0), None)
+            if nested is not None:
+                candidate = nested
+        if candidate.value:
+            object_class = decode_integer(candidate)
     scope = first_context(service_node, 1)
     if scope is not None:
         if scope.children:
             child = scope.children[0]
             if child.tag_class == 2:
-                object_scope = f"[{child.tag}]"
+                if child.tag == 0:
+                    object_scope = "vmdSpecific"
+                elif child.tag == 1:
+                    object_scope = "domainSpecific"
+                    domain_name = _decode_identifier_node(child)
+                elif child.tag == 2:
+                    object_scope = "aaSpecific"
         elif scope.value:
-            object_scope = "[1]"
+            object_scope = "domainSpecific"
+            domain_name = decode_text(scope.value) or None
     cont = first_context(service_node, 2)
     continue_after = decode_text(cont.value) if cont is not None and not cont.constructed else None
-    return object_class, object_scope, continue_after
+    return object_class, object_scope, domain_name, continue_after
 
 
 def _decode_get_name_list_response(service_node: BERNode) -> tuple[list[str], bool | None]:
@@ -308,16 +335,12 @@ def _decode_identifier_node(node: BERNode) -> str | None:
 
 
 def _decode_object_name(service_node: BERNode) -> str | None:
-    """Decode the MMS ObjectName CHOICE used by IEC 61850.
-
-    IEC 61850 commonly uses the domain-specific form [2] containing
-    domainID + itemID.  We preserve the generic CHOICE for other forms.
-    """
-    for tag in (0, 1, 2, 3):
+    """Decode MMS ObjectName exactly, preserving domain/item components."""
+    for tag in (0, 1, 2):
         choice = first_context(service_node, tag)
         if choice is None:
             continue
-        if tag == 2 and choice.children:
+        if tag == 1 and choice.children:
             vals = []
             for child in choice.children:
                 text = _decode_identifier_node(child)
@@ -330,7 +353,6 @@ def _decode_object_name(service_node: BERNode) -> str | None:
         text = _decode_identifier_node(choice)
         if text:
             return text
-        return f"[{tag}]"
     return None
 
 
@@ -454,6 +476,34 @@ def _decode_get_variable_access_attributes_response(service_node: BERNode) -> di
     return {"mmsDeletable": deletable, "typeSpecification": summary, "components": _flatten_type_components(summary)}
 
 
+def _decode_get_named_variable_list_attributes_request(service_node: BERNode) -> str | None:
+    return _decode_object_name(service_node)
+
+
+def _decode_get_named_variable_list_attributes_response(service_node: BERNode) -> dict:
+    deletable = None
+    d = first_context(service_node, 0)
+    if d is not None and d.value:
+        deletable = d.value[0] != 0
+    list_node = first_context(service_node, 1)
+    variables = []
+    if list_node is not None:
+        for item in list_node.children:
+            if item.tag_class == 0 and item.tag == 16 and item.children:
+                name = _decode_object_name(item.children[0])
+                if name:
+                    variables.append(name)
+    return {"mmsDeletable": deletable, "variables": variables}
+
+
+def _decode_identify_response(service_node: BERNode) -> dict:
+    values = {}
+    for tag, key in ((0, "vendor"), (1, "model"), (2, "revision")):
+        node = first_context(service_node, tag)
+        if node is not None:
+            values[key] = decode_text(node.value) if not node.constructed else _decode_identifier_node(node)
+    return values
+
 def decode_mms_pdu(payload: bytes, direction: str = "unknown") -> MMSMessage | None:
     # Presentation/ACSE are BER, but the MMS PDU can be found recursively.
     nodes = parse_ber(payload)
@@ -470,6 +520,9 @@ def decode_mms_pdu(payload: bytes, direction: str = "unknown") -> MMSMessage | N
     more_follows = None
     object_name = None
     variable_attributes = None
+    named_variable_list_attributes = None
+    server_identity = None
+    domain_name = None
     if pdu.tag == 0:  # confirmed-request-pdu
         # invokeID is normally [0], confirmedServiceRequest [1].
         inv = first_context(pdu, 0)
@@ -481,9 +534,11 @@ def decode_mms_pdu(payload: bytes, direction: str = "unknown") -> MMSMessage | N
                 if child.tag_class == 2 and child.tag in REQUEST_SERVICES:
                     service = REQUEST_SERVICES[child.tag]
                     if service == "getNameList":
-                        object_class, object_scope, continue_after = _decode_get_name_list_request(child)
+                        object_class, object_scope, domain_name, continue_after = _decode_get_name_list_request(child)
                     elif service == "getVariableAccessAttributes":
                         object_name = _decode_get_variable_access_attributes_request(child)
+                    elif service == "getNamedVariableListAttributes":
+                        object_name = _decode_get_named_variable_list_attributes_request(child)
                     break
     elif pdu.tag == 1:  # confirmed-response-pdu
         inv = first_context(pdu, 0)
@@ -496,8 +551,12 @@ def decode_mms_pdu(payload: bytes, direction: str = "unknown") -> MMSMessage | N
                     service = RESPONSE_SERVICES[child.tag]
                     if service == "getNameList":
                         identifiers, more_follows = _decode_get_name_list_response(child)
+                    elif service == "identify":
+                        server_identity = _decode_identify_response(child)
                     elif service == "getVariableAccessAttributes":
                         variable_attributes = _decode_get_variable_access_attributes_response(child)
+                    elif service == "getNamedVariableListAttributes":
+                        named_variable_list_attributes = _decode_get_named_variable_list_attributes_response(child)
                     break
     elif pdu.tag == 2:
         service = "confirmed-error"
@@ -512,7 +571,9 @@ def decode_mms_pdu(payload: bytes, direction: str = "unknown") -> MMSMessage | N
         direction, service, invoke_id, pdu, _all_printable_strings(pdu), payload,
         identifiers=identifiers, object_class=object_class, object_scope=object_scope,
         continue_after=continue_after, more_follows=more_follows,
-        object_name=object_name, variable_attributes=variable_attributes
+        object_name=object_name, variable_attributes=variable_attributes,
+        named_variable_list_attributes=named_variable_list_attributes,
+        server_identity=server_identity, domain_name=domain_name
     )
 
 

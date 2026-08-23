@@ -358,7 +358,7 @@ class SCLAnalyzerApp:
         )
 
     # =========================================================
-    # OPEN
+    # OPEN SCL
     # =========================================================
 
     def open_scl(self):
@@ -465,6 +465,11 @@ class SCLAnalyzerApp:
                 str(exc)
             )
 
+
+    # =========================================================
+    # OPEN PCAP
+    # =========================================================
+
     def open_pcap(self):
         filename = filedialog.askopenfilename(
             title="Open PCAP capture",
@@ -494,6 +499,11 @@ class SCLAnalyzerApp:
         except Exception as exc:
             self.status_label.config(text="PCAP analysis failed")
             messagebox.showerror("PCAP Analysis Error", str(exc))
+
+
+    # =========================================================
+    # COMPARE SCL PCAP
+    # =========================================================
 
     def compare_scl_pcap(self):
         scl_filename = filedialog.askopenfilename(
