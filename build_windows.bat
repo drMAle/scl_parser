@@ -6,6 +6,10 @@ echo SCL Analyzer - Windows Build
 echo ========================================
 
 echo.
+echo Cleaning old build
+rmdir /s /q build\SCLAnalyzer
+
+echo.
 echo [1/4] Creating virtual environment...
 if not exist .venv (
     python -m venv .venv

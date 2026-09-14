@@ -45,6 +45,7 @@ The MMS decoder implements the BER/MMS structures needed for:
 - `Identify`
 - `GetVariableAccessAttributes`
 - `GetNamedVariableListAttributes`
+- `Read` / `ReadResponse` with explicitly observed MMS values
 
 The PCAP model uses these transactions to construct an observed XML-shaped model containing only observed:
 
@@ -75,7 +76,7 @@ The parser does not mark a stage as observed unless the corresponding MMS eviden
 - `IEC 61850 checks`
 - `CEI 0-16 checks`
 
-The same analyzer entry point is used for SCL and PCAP models. CEI 0-16 rules are currently applied to SCL models, because the current CEI profile is a configuration/profile validator rather than an observation rule set.
+The same analyzer entry point is used for SCL and PCAP models. The File menu also provides a separate **Check default values in PCAP** action; it loads a capture and evaluates only observed Read/ReadResponse values, without requiring SCL or changing discovery validation. CEI 0-16 rules are currently applied to SCL models, because the current CEI profile is a configuration/profile validator rather than an observation rule set.
 
 ## Command line
 
