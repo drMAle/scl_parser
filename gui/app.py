@@ -11,7 +11,7 @@ class SCLAnalyzerApp:
         self.root=root; root.title(f'{APP_NAME} {VERSION}'); root.geometry('1100x650'); root.minsize(800,500)
         self.current_file=None; self.issues=[]; self.current_model=None; self.create_menu(); self.create_widgets()
     def create_menu(self):
-        mb=tk.Menu(self.root); fm=tk.Menu(mb,tearoff=False); fm.add_command(label='Open SCL',command=self.open_scl); fm.add_command(label='Open PCAP',command=self.open_pcap); fm.add_command(label='Compare SCL and PCAP',command=self.compare_scl_pcap); fm.add_separator(); fm.add_command(label='Exit',command=self.root.quit); mb.add_cascade(label='File',menu=fm)
+        mb=tk.Menu(self.root); fm=tk.Menu(mb,tearoff=False); fm.add_command(label='Open SCL',command=self.open_scl); fm.add_command(label='Open PCAP',command=self.open_pcap); fm.add_command(label='Compare SCL and PCAP',command=self.compare_scl_pcap); fm.add_separator(); fm.add_command(label='Check default values in PCAP',command=self.check_default_values); fm.add_separator(); fm.add_command(label='Exit',command=self.root.quit); mb.add_cascade(label='File',menu=fm)
         om=tk.Menu(mb,tearoff=False); self.iec61850_enabled=tk.BooleanVar(value=True); self.cei016_enabled=tk.BooleanVar(value=True); om.add_checkbutton(label='IEC 61850 checks',variable=self.iec61850_enabled); om.add_checkbutton(label='CEI 0-16 checks',variable=self.cei016_enabled); mb.add_cascade(label='Options',menu=om)
         hm=tk.Menu(mb,tearoff=False); hm.add_command(label='About',command=self.show_about); mb.add_cascade(label='Help',menu=hm); self.root.config(menu=mb)
     def create_widgets(self):
@@ -42,6 +42,16 @@ class SCLAnalyzerApp:
         self.open_path(filename, kind)
     def open_scl(self): self._open('scl')
     def open_pcap(self): self._open('pcap')
+    def check_default_values(self):
+        filename=filedialog.askopenfilename(title='Select PCAP capture',filetypes=[('Capture files','*.pcap *.pcapng'),('All files','*.*')])
+        if not filename:return
+        self.clear_results(); self.current_file=Path(filename); self.file_label.config(text=str(self.current_file)); self.status_label.config(text='Checking default values...'); self.root.update_idletasks()
+        try:
+            model=PcapModel(self.current_file).load()
+            from rules.iec61850.default_values import check_default_values
+            self.current_model=model; self.issues=check_default_values(model); self.display_results(); self.status_label.config(text='Default-value check completed'); self._summary('Default-value check')
+        except Exception as exc:
+            self.status_label.config(text='Default-value check failed'); messagebox.showerror('Default-value Check Error',str(exc))
     def compare_scl_pcap(self):
         sf=filedialog.askopenfilename(title='Select SCL file',filetypes=[('SCL files','*.cid *.icd *.scd *.scl'),('All files','*.*')]);
         if not sf:return
